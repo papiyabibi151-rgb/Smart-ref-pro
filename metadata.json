@@ -1,0 +1,6 @@
+{
+  "name": "SMART REF PRO",
+  "description": "Complete professional service management platform for SMART REFRIGERATION. Manage technicians, job distribution, invoices, attendance, and salaries.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

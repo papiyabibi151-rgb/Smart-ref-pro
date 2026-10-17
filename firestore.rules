@@ -1,0 +1,116 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isOwner() {
+      return isAuthenticated() && getUserData().role == 'OWNER';
+    }
+
+    function isTechnician() {
+      return isAuthenticated() && (getUserData().role == 'TECHNICIAN' || getUserData().role == 'OWNER');
+    }
+
+    function isEmployee() {
+      return isAuthenticated() && (getUserData().role in ['OWNER', 'TECHNICIAN', 'HELPER']);
+    }
+
+    // Company Settings & Branding
+    match /company_settings/{settingId} {
+      allow read: if isEmployee();
+      allow write: if isOwner();
+    }
+
+    // Employees Collection
+    match /employees/{employeeId} {
+      allow read: if isEmployee();
+      allow write: if isOwner();
+    }
+
+    // Service Jobs
+    match /jobs/{jobId} {
+      // Owner can read and write all jobs
+      // Technicians and Helpers can read jobs where they are assigned
+      allow read: if isOwner() || 
+        (isAuthenticated() && (
+          resource.data.assignedTechnicianId == request.auth.uid || 
+          resource.data.assignedHelperId == request.auth.uid
+        ));
+      
+      // Owner can create and delete jobs
+      allow create, delete: if isOwner();
+
+      // Technicians can update job status, work notes, and parts used on their assigned jobs
+      allow update: if isOwner() || (
+        isAuthenticated() && 
+        (resource.data.assignedTechnicianId == request.auth.uid || resource.data.assignedHelperId == request.auth.uid) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusNote', 'partsUsed', 'workReportNotes', 'completedAt'])
+      );
+    }
+
+    // Invoices
+    match /invoices/{invoiceId} {
+      // Owner can manage all invoices
+      allow read, update, delete: if isOwner();
+      // Technicians can create draft invoices
+      allow create: if isTechnician();
+      // Allow reading invoice if technician was assigned to the job
+      allow read: if isTechnician() && resource.data.technicianId == request.auth.uid;
+    }
+
+    // Attendance
+    match /attendance/{attendanceId} {
+      // Staff can create their own punch-in/out
+      allow create: if isEmployee() && request.resource.data.employeeId == request.auth.uid;
+      // Staff can read their own attendance
+      allow read: if isOwner() || (isEmployee() && resource.data.employeeId == request.auth.uid);
+      // Only Owner can approve or edit attendance
+      allow update, delete: if isOwner();
+    }
+
+    // Salaries (Confidential)
+    match /salaries/{salaryId} {
+      // Employees can only view their own salary slip
+      allow read: if isOwner() || (isEmployee() && resource.data.employeeId == request.auth.uid);
+      // Only Owner can calculate, disburse, or edit salaries
+      allow write: if isOwner();
+    }
+
+    // Spare Parts Inventory
+    match /spare_parts/{partId} {
+      allow read: if isEmployee();
+      allow write: if isOwner();
+      // Allow technician to decrement stock upon job completion
+      allow update: if isTechnician() && 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['availableQuantity']);
+    }
+
+    // Customers
+    match /customers/{customerId} {
+      allow read, create: if isEmployee();
+      allow update, delete: if isOwner();
+    }
+
+    // Customer Reviews & Feedback
+    match /feedbacks/{feedbackId} {
+      allow read: if isEmployee();
+      allow create: if true; // Public feedback link submission
+      allow update, delete: if isOwner();
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if isEmployee();
+      allow write: if isOwner();
+      allow update: if isEmployee() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+    }
+  }
+}
